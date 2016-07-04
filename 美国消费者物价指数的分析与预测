@@ -1,0 +1,275 @@
+########美国消费者物价指数的分析与预测#######
+########作者：郭伟&张陆乐##########
+########2015年5月##########
+
+
+#################导入数据##################
+data <- read.csv("C:/Users/Jason/Desktop/TS论文/data/cpi.csv")
+cpidata <- data[,1:2]
+attach(cpidata)
+cpi <- cpidata$cpi
+month <- cpidata$month
+summary(cpi)
+
+################描述性分析##################
+library(fBasics)
+skewness(cpi)
+kurtosis (cpi)
+ts.plot(cpi)
+plot(density(cpi))
+boxplot(cpi)
+acf(cpi)
+
+################提取趋势################
+library(ggplot2)
+qplot(month,cpi,colour=cpi)
+cpi <- ts(cpi,frequency=12)
+decompose(cpi)
+plot(decompose(cpi))
+trend <- decompose(cpi)$trend[7:811]
+seasonal <- decompose(cpi)$seasonal[7:811]
+res <- decompose(cpi)$random[7:811]
+
+ts.plot(cpi,col="blue",lwd=2)
+ts.plot(res)
+###############提取趋势后的数据检验###############
+library(tseries)
+adf.test(res)
+PP.test(res)
+kpss.test(res)
+Box.test(res)
+
+###########ARIMA########
+acf(res,lag=50)
+pacf(res,lag=50)
+
+library(forecast)
+res1 <- ts(res,frequency=12)
+arima1 <- auto.arima(res1,ic="aic")
+arima1
+plot(arima1$res)
+Box.test(arima1$res)
+plot(forecast(arima1,h=5))
+
+################GARCHfit###############
+###ARCH效应检验######
+library(timeDate)
+library(timeSeries)
+library(fBasics)
+library(fGarch)
+library(FinTS)
+library(tseries)
+library(rugarch)
+ArchTest(res)
+
+#######GARCH拟合(多次试验取AIC最小的)######
+res.arima <- arima1$res
+ArchTest(res.arima)
+k=garchFit(~ garch(1,1), data = res.arima ,cond.dist="std")
+summary(garchFit(~ garch(1,1), data = res.arima ,cond.dist="std"))
+
+spec=ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1), 
+                                      submodel =NULL), 
+                mean.model = list(armaOrder = c(4,3), include.mean = TRUE), 
+                distribution.model = "std")###std的aic最小###
+GARCHfit=ugarchfit(spec, res)
+GARCHfit
+infocriteria(GARCHfit)####求aic#####
+show(GARCHfit)
+e=ts(residuals(GARCHfit,standard=T))[,1]
+
+####distribution拟合图####
+des.gres=density.default(x=e)
+plot(des.gres,col='blue',add=T)
+curve(dstd(x,0,1.1),col='red',xlim=c(-5,5),add=T)####用std(x,0,1.1)来拟合igarch（1,1）拟合后的残差
+legend("topleft",c("Observed","Fitted"),lty=c(1,1),col=c("blue","red"))
+
+
+######GARCHfit后的残差检验################
+adf.test(e)          
+pp.test(e)   
+kpss.test(e) 
+Box.test(e)
+ArchTest(e)
+jarqueberaTest(e)
+ts.plot(e)
+
+#########样本内外预测###############
+f=ts(fitted(GARCHfit))[,1]
+length(f)
+Fitted <- trend+seasonal+f
+plot(Fitted,col="red")
+
+F=numeric()
+F=c(cpi[712:801],Fitted[796:805])
+ts.plot(F,col="red")
+lines(cpi[712:811])
+
+RR=numeric()########预测值与真实值的相对误差########
+for (i in 1:10){RR[i]=(Fitted[i+795]-cpi[i+801])/cpi[i+801]}
+RR
+
+#####样本外预测######
+trend1=as.matrix(trend)
+trend1=trend1[,1]
+trend1=ts(trend1)
+trendf=predict(trend,h=13)
+trendf=data.frame(trendf)
+trendf=trendf[,1]
+
+seasonal1=as.matrix(seasonal)
+seasonal1=seasonal1[,1]
+seasonal1=ts(seasonal1)
+seasonalf=predict(seasonal1,h=13)
+seasonalf=data.frame(seasonalf)
+seasonalf=seasonalf[,1]
+
+g.pred=ugarchforecast(GARCHfit,n.ahead = 13)
+F2=fitted(g.pred)[,1]
+cpi.PRED=numeric()
+
+
+cpi.PRED=trendf+seasonalf+F2
+FF=numeric()
+FF=c(cpi[712:811],cpi.PRED[1:10])
+ts.plot(FF,lty=3,col='red')
+lines(cpi[712:811])
+
+
+RR=numeric()########预测值与真实值的相对误差########
+for (i in 1:2){RR[i]=(cpi.PRED[i+5]-cpi[i+815])/cpi[i+815]}
+RR
+################################协整###################################
+####数据初处理####
+ppi=read.csv("C:/Users/Jason/Desktop/TS论文/data/ppi.csv")
+cpi=read.csv("C:/Users/Jason/Desktop/TS论文/data/cpi.csv")
+ppi=ppi[,2]
+cpi=cpi[,2]
+lppi=log(ppi)
+lcpi=log(cpi*100)
+ts.plot(lppi,col="red",ylim=c(2,13))
+lines(lcpi,col="blue")
+legend("topleft",inset=0.05,c("log(PPI)","log(CPI*100)"),lty=c(1,2),pch=c(15,17),col=c("red","blue"))
+lcpi=log(cpi)
+
+###时序图
+par(mfrow=c(2,1))
+ts.plot(ppi,col="red",xlim=c(0,817))
+ts.plot(cpi,col="blue",xlim=c(0,817))
+ts.plot(lppi,col="red",ylim=c(3,6))
+lines(lcpi,col="blue")
+legend("topleft",inset=0.05,c("log(ppi)","log(CPI)"),lty=c(1,2),pch=c(15,17),col=c("red","blue"))
+
+###单位根检验
+library(urca)
+ppi0=ur.df(lppi,"drift",selectlags="AIC")
+summary(ppi0)
+cpi0=ur.df(lcpi,"drift",selectlags="AIC")
+summary(cpi0)
+adf.test(lppi)  #p=0.99,不平稳#
+adf.test(lcpi)
+pp.test(lppi)
+kpss.test(lppi)
+pp.test(lcpi)
+kpss.test(lcpi)
+
+###一阶、二阶差分单位根检验
+dlppi=diff(lppi)
+dlcpi=diff(lcpi)
+ppi1=ur.df(dlppi,"drift",selectlags="AIC")
+summary(ppi1)
+cpi1=ur.df(dlcpi,"drift",selectlags="AIC")
+summary(cpi1)
+adf.test(dlppi)  #p仍不平稳#
+adf.test(dlcpi)
+pp.test(dlppi)
+kpss.test(dlppi)
+pp.test(dlcpi)
+kpss.test(dlcpi)
+
+####EG两步法####
+reg=lm(lcpi~lppi)
+summary(reg)     
+library(lmtest)
+dw=dwtest(reg)      
+dw                  
+error=residuals(reg)#伪回归#
+
+par(mfrow=c(2,2))
+ts.plot(error)
+acf(error)
+pacf(error)
+plot(density(error))
+urd.resid=ur.df(error,"drift",selectlags="AIC")
+summary(urd.resid)
+adf.test(error) 
+pp.test(error)
+kpss.test(error)
+
+####1阶滞后的EG两步处理####
+lppi0=lppi[2:817]
+lcpi0=lcpi[2:817]
+lppi1=lppi[1:816]
+lcpi1=lcpi[1:816]
+reg1=lm(lcpi0~lppi0+lppi1+lcpi1)
+summary(reg1)
+dw=dwtest(reg1)      
+dw                 
+error1=residuals(reg1,standard=T)
+
+par(mfrow=c(2,2))
+ts.plot(error1)
+acf(error1)
+pacf(error1)
+plot(density(error1))
+
+urd.resid1=ur.df(error1,"drift",selectlags="AIC")
+summary(urd.resid1)
+adf.test(error1)     #p=0.01,平稳#
+pp.test(error1)
+kpss.test(error1)
+
+
+####误差修正模型####
+error.lagged=error1[-c(815,816)]
+length(error.lagged)
+dlppi0=dlppi[2:815]
+dlcpi0=dlcpi[2:815]
+dlppi1=dlppi[1:814]
+dlcpi1=dlcpi[1:814]
+ecm.reg=lm(dlcpi0~error.lagged+dlppi0+dlppi1+dlcpi1)
+summary(ecm.reg) 
+
+dw=dwtest(ecm.reg)  
+dw        
+ecm.error=residuals(ecm.reg,standard=T)
+par(mfrow=c(2,2))
+ts.plot(ecm.error)
+acf(ecm.error)
+pacf(ecm.error)
+plot(density(ecm.error))
+ecm.urd.resid=ur.df(ecm.error,"drift",selectlags="AIC")
+summary(ecm.urd.resid)
+adf.test(ecm.error)
+pp.test(ecm.error)
+kpss.test(ecm.error)
+
+####格兰杰因果检验####
+
+grangertest(lcpi~lppi,order=1)
+grangertest(lppi~lcpi,order=1)
+
+  
+####BP神经网络模型####
+library(nnet)
+norm.cpi <- scale(cpi[1:812])
+bp.cpi <- nnet(cpi~month,norm.cpi,size=10,decay=0.01,maxit=1000,linout=T,trace=F)
+bp.cpi
+check.cpi <- predict(bp.cpi,newdata=month)
+check.cpi[813:817,]
+wucha <- (check.cpi-cpi)/cpi
+wucha[813:817,]
+month[818:827] <- seq(818,827)
+pred.cpi <- predict(bp.cpi,newdata=month)#predict函数要求newdata名字一致
+pred.cpi[818:827]
+
